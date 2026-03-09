@@ -34,7 +34,16 @@ const prompt = (q: string): Promise<string | null> =>
     }
   });
 
-async function chat(userMessage: string): Promise<string> {
+// Step 2: Gemini conversation messages are { role, parts } objects.
+type GeminiMessage = {
+  role: "user" | "model";
+  parts: Array<{ text: string }>;
+};
+
+// Step 2: Keep conversation history outside the loop so it persists across turns.
+const messages: GeminiMessage[] = [];
+
+async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
     {
@@ -43,7 +52,8 @@ async function chat(userMessage: string): Promise<string> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: userMessage }] }],
+        // Step 2: Send the full conversation history, not just the latest user message.
+        contents: messages,
         generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
       }),
     },
@@ -54,7 +64,7 @@ async function chat(userMessage: string): Promise<string> {
   }
 
   const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+  return data.candidates[0].content;
 }
 
 async function main() {
@@ -64,8 +74,13 @@ async function main() {
       break;
     }
 
-    const reply = await chat(input);
-    console.log(reply);
+    // Step 2: Append the user's input as a Gemini user message.
+    messages.push({ role: "user", parts: [{ text: input }] });
+
+    const reply = await chat(messages);
+    // Step 2: Append Gemini's model message so later turns can reference it.
+    messages.push(reply);
+    console.log(reply.parts[0].text);
   }
 
   rl.close();
