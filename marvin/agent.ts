@@ -77,20 +77,33 @@ const getToolCallParts = (
     (part: GeminiPart): part is { functionCall: GeminiFunctionCall } => "functionCall" in part,
   );
 
-// Step 5: Execute the tool request in the runtime instead of only detecting it.
+// Step 6: Route tool execution by tool name instead of hardcoding a single tool.
 function runToolCall(toolCall: GeminiFunctionCall): string {
-  if (toolCall.name === "list_files") {
-    const directory =
-      typeof toolCall.args.directory === "string" ? toolCall.args.directory : ".";
+  switch (toolCall.name) {
+    case "list_files": {
+      const directory =
+        typeof toolCall.args.directory === "string" ? toolCall.args.directory : ".";
 
-    try {
-      return readdirSync(directory).join("\n");
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      try {
+        return readdirSync(directory).join("\n");
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
     }
-  }
 
-  return `Unknown tool: ${toolCall.name}`;
+    case "read_file": {
+      const path = typeof toolCall.args.path === "string" ? toolCall.args.path : "";
+
+      try {
+        return readFileSync(path, "utf-8");
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    default:
+      return `Unknown tool: ${toolCall.name}`;
+  }
 }
 
 async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
@@ -122,6 +135,21 @@ async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
                     },
                   },
                   required: ["directory"],
+                },
+              },
+              // Step 6: Declare a read_file tool so Gemini can request file contents by path.
+              {
+                name: "read_file",
+                description: "Read the contents of a file at the given path",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    path: {
+                      type: "string",
+                      description: "File path to read",
+                    },
+                  },
+                  required: ["path"],
                 },
               },
             ],
