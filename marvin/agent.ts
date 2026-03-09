@@ -1,5 +1,5 @@
 import * as readline from "node:readline";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 // Load .env file
 const env = readFileSync(".env", "utf-8");
@@ -49,15 +49,49 @@ type GeminiFunctionCall = {
   args: Record<string, unknown>;
 };
 
-type GeminiPart = { text: string } | { functionCall: GeminiFunctionCall };
+type GeminiFunctionResponse = {
+  name: string;
+  response: {
+    name: string;
+    content: string;
+  };
+};
+
+type GeminiPart =
+  | { text: string }
+  | { functionCall: GeminiFunctionCall }
+  | { functionResponse: GeminiFunctionResponse };
 
 type GeminiMessage = {
-  role: "user" | "model";
+  role: "user" | "model" | "function";
   parts: GeminiPart[];
 };
 
 // Step 2: Keep conversation history outside the loop so it persists across turns.
 const messages: GeminiMessage[] = [];
+
+const getToolCallParts = (
+  parts: GeminiPart[],
+): Array<{ functionCall: GeminiFunctionCall }> =>
+  parts.filter(
+    (part: GeminiPart): part is { functionCall: GeminiFunctionCall } => "functionCall" in part,
+  );
+
+// Step 5: Execute the tool request in the runtime instead of only detecting it.
+function runToolCall(toolCall: GeminiFunctionCall): string {
+  if (toolCall.name === "list_files") {
+    const directory =
+      typeof toolCall.args.directory === "string" ? toolCall.args.directory : ".";
+
+    try {
+      return readdirSync(directory).join("\n");
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  return `Unknown tool: ${toolCall.name}`;
+}
 
 async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
   const response = await fetch(
@@ -108,9 +142,7 @@ async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
   const parts = data.candidates[0].content.parts;
 
   // Step 4: Detect Gemini tool calls by inspecting response.parts directly.
-  const toolCallParts = parts.filter(
-    (part: GeminiPart): part is { functionCall: GeminiFunctionCall } => "functionCall" in part,
-  );
+  const toolCallParts = getToolCallParts(parts);
 
   // Step 4: Print tool calls, but do not execute them yet.
   for (const part of toolCallParts) {
@@ -130,19 +162,47 @@ async function main() {
     // Step 2: Append the user's input as a Gemini user message.
     messages.push({ role: "user", parts: [{ text: input }] });
 
-    const reply = await chat(messages);
-    // Step 4: If Gemini returned a tool call, stop here after logging it.
-    const hasToolCall = reply.parts.some((part) => "functionCall" in part);
-    if (hasToolCall) {
-      continue;
-    }
+    // Step 5: Keep looping until Gemini stops asking for tools and returns text.
+    while (true) {
+      const reply = await chat(messages);
+      const toolCallParts = getToolCallParts(reply.parts);
 
-    // Step 2: Append Gemini's model message so later turns can reference it.
-    messages.push(reply);
-    // Step 4: Only print a normal reply when the response contains text instead of a tool call.
-    const textPart = reply.parts.find((part): part is { text: string } => "text" in part);
-    if (textPart) {
-      console.log(textPart.text);
+      // Step 5: Append Gemini's tool-call message before sending function results back.
+      messages.push(reply);
+
+      if (toolCallParts.length > 0) {
+        const functionResponseParts = toolCallParts.map(({ functionCall }) => {
+          const result = runToolCall(functionCall);
+
+          // Step 5: Print the real tool result so you can see what the runtime executed.
+          console.log(`📄 ${result}`);
+
+          return {
+            functionResponse: {
+              name: functionCall.name,
+              response: {
+                name: functionCall.name,
+                content: result,
+              },
+            },
+          };
+        });
+
+        // Step 5: Send all tool results back in a single Gemini function-role message.
+        messages.push({
+          role: "function",
+          parts: functionResponseParts,
+        });
+        continue;
+      }
+
+      // Step 5: Once there are no tool calls, print the final text answer and stop looping.
+      const textPart = reply.parts.find((part): part is { text: string } => "text" in part);
+      if (textPart) {
+        console.log(textPart.text);
+      }
+
+      break;
     }
   }
 
