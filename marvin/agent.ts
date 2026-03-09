@@ -44,9 +44,16 @@ const prompt = (q: string): Promise<string | null> =>
   });
 
 // Step 2: Gemini conversation messages are { role, parts } objects.
+type GeminiFunctionCall = {
+  name: string;
+  args: Record<string, unknown>;
+};
+
+type GeminiPart = { text: string } | { functionCall: GeminiFunctionCall };
+
 type GeminiMessage = {
   role: "user" | "model";
-  parts: Array<{ text: string }>;
+  parts: GeminiPart[];
 };
 
 // Step 2: Keep conversation history outside the loop so it persists across turns.
@@ -65,6 +72,27 @@ async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
         systemInstruction: {
           parts: [{ text: SYSTEM_PROMPT }],
         },
+        // Step 4: Declare tools in the request so Gemini can ask to use them.
+        tools: [
+          {
+            functionDeclarations: [
+              {
+                name: "list_files",
+                description: "List files and directories at the given path",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    directory: {
+                      type: "string",
+                      description: "Directory path to list",
+                    },
+                  },
+                  required: ["directory"],
+                },
+              },
+            ],
+          },
+        ],
         // Step 2: Send the full conversation history, not just the latest user message.
         contents: messages,
         generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
@@ -77,6 +105,18 @@ async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
   }
 
   const data = await response.json();
+  const parts = data.candidates[0].content.parts;
+
+  // Step 4: Detect Gemini tool calls by inspecting response.parts directly.
+  const toolCallParts = parts.filter(
+    (part: GeminiPart): part is { functionCall: GeminiFunctionCall } => "functionCall" in part,
+  );
+
+  // Step 4: Print tool calls, but do not execute them yet.
+  for (const part of toolCallParts) {
+    console.log(`🔧 ${part.functionCall.name}(${JSON.stringify(part.functionCall.args)})`);
+  }
+
   return data.candidates[0].content;
 }
 
@@ -91,9 +131,17 @@ async function main() {
     messages.push({ role: "user", parts: [{ text: input }] });
 
     const reply = await chat(messages);
+    const hasToolCall = reply.parts.some((part) => "functionCall" in part);
+    if (hasToolCall) {
+      continue;
+    }
+
     // Step 2: Append Gemini's model message so later turns can reference it.
     messages.push(reply);
-    console.log(reply.parts[0].text);
+    const textPart = reply.parts.find((part): part is { text: string } => "text" in part);
+    if (textPart) {
+      console.log(textPart.text);
+    }
   }
 
   rl.close();
