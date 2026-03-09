@@ -17,6 +17,15 @@ if (!API_KEY) {
   process.exit(1);
 }
 
+// Step 3: Define the system prompt at the top of the file so the agent has an identity.
+const SYSTEM_PROMPT = `You are Marvin, a coding assistant. You help users with programming tasks.
+
+You have access to tools that let you interact with the filesystem and run commands.
+Use tools proactively to understand a project before asking for paths or details.
+Be concise and helpful.
+
+Working directory: ${process.cwd()}`;
+
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const prompt = (q: string): Promise<string | null> =>
   new Promise((resolve) => {
@@ -52,6 +61,10 @@ async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        // Step 3: Gemini system prompts go in top-level systemInstruction, not in contents.
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
         // Step 2: Send the full conversation history, not just the latest user message.
         contents: messages,
         generationConfig: { thinkingConfig: { thinkingBudget: 0 } },
