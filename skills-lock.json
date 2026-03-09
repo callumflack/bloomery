@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "bloomery": {
+      "source": "mgratzer/bloomery",
+      "sourceType": "github",
+      "computedHash": "ec46f6cbc7a630ba0dde5c5dfdc70a68eaf2c381c03633eadf478988c8f2b61c"
+    }
+  }
+}
