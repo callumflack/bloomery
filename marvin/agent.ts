@@ -1,4 +1,6 @@
 import * as readline from "node:readline";
+// Step 7: Import execSync so the agent can run bash commands.
+import { execSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 
 // Load .env file
@@ -101,6 +103,37 @@ function runToolCall(toolCall: GeminiFunctionCall): string {
       }
     }
 
+    // Step 7: Route run_bash tool calls into a real shell command execution path.
+    case "run_bash": {
+      // Step 7: Read the command argument that Gemini asked the runtime to execute.
+      const command = typeof toolCall.args.command === "string" ? toolCall.args.command : "";
+
+      try {
+        // Step 7: Run the command with a 30 second timeout and capture output as text.
+        const output = execSync(command, {
+          encoding: "utf-8",
+          stdio: "pipe",
+          timeout: 30_000,
+          shell: "/bin/bash",
+        });
+
+        return output;
+      } catch (error: unknown) {
+        // Step 7: Non-zero exits should return output, not crash the agent.
+        const commandError = error as {
+          stdout?: { toString(): string };
+          stderr?: { toString(): string };
+          status?: number | string;
+        };
+        const stdout = commandError.stdout?.toString?.() ?? "";
+        const stderr = commandError.stderr?.toString?.() ?? "";
+        const status = commandError.status ?? "unknown";
+        const combined = `${stdout}${stderr}`.trim();
+
+        return combined ? `Exit code ${status}: ${combined}` : `Exit code ${status}`;
+      }
+    }
+
     default:
       return `Unknown tool: ${toolCall.name}`;
   }
@@ -150,6 +183,21 @@ async function chat(messages: GeminiMessage[]): Promise<GeminiMessage> {
                     },
                   },
                   required: ["path"],
+                },
+              },
+              // Step 7: Declare a run_bash tool so Gemini can execute shell commands.
+              {
+                name: "run_bash",
+                description: "Execute a bash command and return its output",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    command: {
+                      type: "string",
+                      description: "Bash command to execute",
+                    },
+                  },
+                  required: ["command"],
                 },
               },
             ],
