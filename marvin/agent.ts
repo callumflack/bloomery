@@ -131,6 +131,7 @@ async function main() {
     messages.push({ role: "user", parts: [{ text: input }] });
 
     const reply = await chat(messages);
+    // Step 4: If Gemini returned a tool call, stop here after logging it.
     const hasToolCall = reply.parts.some((part) => "functionCall" in part);
     if (hasToolCall) {
       continue;
@@ -138,6 +139,7 @@ async function main() {
 
     // Step 2: Append Gemini's model message so later turns can reference it.
     messages.push(reply);
+    // Step 4: Only print a normal reply when the response contains text instead of a tool call.
     const textPart = reply.parts.find((part): part is { text: string } => "text" in part);
     if (textPart) {
       console.log(textPart.text);
